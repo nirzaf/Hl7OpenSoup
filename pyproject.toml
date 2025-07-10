@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hl7-opensoup"
+version = "1.0.0"
+description = "Advanced HL7 Desktop Viewer and Editor - A Python-based replica of HL7 Soup"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "HL7 OpenSoup Development Team", email = "dev@hl7opensoup.com"},
+]
+keywords = ["hl7", "healthcare", "medical", "viewer", "editor", "desktop"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Healthcare Industry",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Environment :: X11 Applications :: Qt",
+]
+
+dependencies = [
+    "PyQt6>=6.6.0",
+    "hl7apy>=1.3.4",
+    "hl7>=0.3.4",
+    "pymongo>=4.6.0",
+    "pandas>=2.1.0",
+    "openpyxl>=3.1.0",
+    "lxml>=4.9.0",
+    "pyyaml>=6.0.1",
+    "chardet>=5.2.0",
+    "colorama>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-qt>=4.2.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+packaging = [
+    "pyinstaller>=6.0.0",
+    "cx-freeze>=6.15.0",
+]
+
+[project.scripts]
+hl7-opensoup = "hl7opensoup.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hl7opensoup = [
+    "config/*.yaml",
+    "schemas/*.json",
+    "resources/*.png",
+    "resources/*.ico",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
