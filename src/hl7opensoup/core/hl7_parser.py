@@ -174,48 +174,80 @@ class HL7Parser:
         # Try parsing with available libraries
         if self.use_hl7apy:
             try:
-                return self._parse_with_hl7apy(message_str)
+                print("DEBUG: Trying hl7apy parsing")
+                result = self._parse_with_hl7apy(message_str)
+                print("DEBUG: hl7apy parsing succeeded")
+                return result
             except Exception as e:
+                print(f"DEBUG: hl7apy parsing failed: {e}")
                 self.logger.debug(f"hl7apy parsing failed: {e}")
-        
+
         if self.use_hl7:
             try:
-                return self._parse_with_hl7(message_str)
+                print("DEBUG: Trying hl7 library parsing")
+                result = self._parse_with_hl7(message_str)
+                print("DEBUG: hl7 library parsing succeeded")
+                return result
             except Exception as e:
+                print(f"DEBUG: hl7 library parsing failed: {e}")
                 self.logger.debug(f"hl7 library parsing failed: {e}")
-        
+
         # Fallback to basic parsing
+        print("DEBUG: Using basic parsing")
         return self._parse_basic(message_str)
     
     def _parse_with_hl7apy(self, message_str: str) -> HL7Message:
         """Parse message using hl7apy library.
-        
+
         Args:
             message_str: HL7 message string
-            
+
         Returns:
             Parsed HL7Message object
         """
+        from hl7opensoup.models.hl7_message import ValidationResult, ValidationLevel
+
         # Parse with hl7apy
         hl7apy_msg = hl7apy_parse(message_str, validation_level=VALIDATION_LEVEL.QUIET)
-        
+
         # Convert to our data model
         message = HL7Message(raw_content=message_str)
-        
+
         # Extract separators from MSH
         if message_str.startswith('MSH'):
             message.separators = HL7Separators.from_msh_segment(message_str.split('\r')[0])
-        
+
         # Convert segments
         for hl7apy_seg in hl7apy_msg.children:
             segment = self._convert_hl7apy_segment(hl7apy_seg, message.separators)
             message.segments.append(segment)
-        
+
         # Extract message metadata
         message.message_type = message.get_message_type()
         message.control_id = message.get_control_id()
         message.version = message.get_version()
-        
+
+        # Basic validation during parsing - check for invalid segment names
+        validation_results = []
+        for segment in message.segments:
+            # Check if segment name is valid (should be 3 characters, alphanumeric)
+            if not segment.name or len(segment.name) != 3 or not segment.name.isalnum():
+                validation_results.append(ValidationResult(
+                    level=ValidationLevel.ERROR,
+                    message=f"Invalid segment name: '{segment.name}'",
+                    location=f"Segment {segment.name}"
+                ))
+            # Check for segments that don't start with known prefixes
+            elif not segment.name.startswith(('MSH', 'EVN', 'PID', 'NK1', 'PV1', 'OBR', 'OBX', 'AL1', 'DG1', 'PR1', 'GT1', 'IN1', 'ACC', 'UB1', 'UB2')):
+                # This is a basic check - in reality, there are many more valid segment types
+                if not segment.name.startswith('Z'):  # Z-segments are custom and allowed
+                    validation_results.append(ValidationResult(
+                        level=ValidationLevel.WARNING,
+                        message=f"Unknown segment type: '{segment.name}'",
+                        location=f"Segment {segment.name}"
+                    ))
+
+        message.validation_results = validation_results
         return message
     
     def _parse_with_hl7(self, message_str: str) -> HL7Message:
