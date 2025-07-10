@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, QDir
 from PyQt6.QtGui import QIcon
 
 from hl7opensoup.ui.main_window import MainWindow
+from hl7opensoup.ui.hl7_soup_style import apply_hl7_soup_style
 from hl7opensoup.utils.logging_config import setup_logging
 from hl7opensoup.config.app_config import AppConfig
 
@@ -37,6 +38,9 @@ def setup_application():
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("HL7 OpenSoup")
     app.setOrganizationDomain("hl7opensoup.com")
+
+    # Apply HL7 Soup styling
+    apply_hl7_soup_style(app)
 
     # Set application icon
     icon_path = Path(__file__).parent / "resources" / "app_icon.ico"
