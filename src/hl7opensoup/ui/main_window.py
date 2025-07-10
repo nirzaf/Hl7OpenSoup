@@ -30,6 +30,9 @@ from hl7opensoup.ui.hl7_soup_style import (
 )
 from hl7opensoup.utils.file_utils import HL7FileManager, HL7FileValidator
 from hl7opensoup.ui.search_dialog import AdvancedSearchDialog
+from hl7opensoup.ui.export_dialog import ExportDialog
+from hl7opensoup.ui.mongodb_dialog import MongoDBDialog
+from hl7opensoup.database.mongodb_connector import MongoDBConnector, MongoDBConfig
 
 
 class MainWindow(QMainWindow):
@@ -62,6 +65,10 @@ class MainWindow(QMainWindow):
 
         # Search dialog
         self.search_dialog: Optional[AdvancedSearchDialog] = None
+
+        # MongoDB connector (optional)
+        self.mongodb_connector: Optional[MongoDBConnector] = None
+        self.mongodb_config = MongoDBConfig()
 
         # Window properties
         self.setWindowTitle("HL7 OpenSoup - Advanced HL7 Viewer and Editor")
@@ -471,6 +478,15 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # MongoDB save action
+        self.save_to_mongodb_action = QAction("Save to &MongoDB...", self)
+        self.save_to_mongodb_action.setStatusTip("Save messages to MongoDB database")
+        self.save_to_mongodb_action.triggered.connect(self._save_to_mongodb)
+        self.save_to_mongodb_action.setEnabled(False)
+        file_menu.addAction(self.save_to_mongodb_action)
+
+        file_menu.addSeparator()
+
         # Recent files submenu
         self.recent_menu = file_menu.addMenu("Recent Files")
         self._update_recent_files_menu()
@@ -538,6 +554,13 @@ class MainWindow(QMainWindow):
         self.export_action.triggered.connect(self._export_message)
         self.export_action.setEnabled(False)
         tools_menu.addAction(self.export_action)
+
+        tools_menu.addSeparator()
+
+        self.mongodb_action = QAction("&MongoDB Configuration...", self)
+        self.mongodb_action.setStatusTip("Configure MongoDB database connection")
+        self.mongodb_action.triggered.connect(self._show_mongodb_dialog)
+        tools_menu.addAction(self.mongodb_action)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -808,13 +831,22 @@ class MainWindow(QMainWindow):
         if current_item and self.current_collection:
             message_index = self.message_list.row(current_item)
             if 0 <= message_index < len(self.current_collection):
-                message = self.current_collection[message_index]
+                # Create a temporary collection with just the selected message
+                from hl7opensoup.models.hl7_message import HL7MessageCollection
+                temp_collection = HL7MessageCollection()
+                temp_collection.add_message(self.current_collection[message_index])
 
-                # For now, just show a placeholder
-                QMessageBox.information(
-                    self, "Export",
-                    "Export functionality will be implemented in the Data Transformation task."
-                )
+                # Open export dialog with the temporary collection
+                export_dialog = ExportDialog(temp_collection, self)
+
+                # Pre-select "current message only" option
+                if hasattr(export_dialog, 'current_message_radio'):
+                    export_dialog.current_message_radio.setChecked(True)
+
+                if export_dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.status_bar.showMessage("Export completed successfully")
+                else:
+                    self.status_bar.showMessage("Export cancelled")
 
     def _on_segment_selected(self, segment_name: str):
         """Handle segment selection in the segment grid."""
@@ -1317,8 +1349,10 @@ class MainWindow(QMainWindow):
             # Enable actions
             self.save_action.setEnabled(True)
             self.save_as_action.setEnabled(True)
+            self.save_to_mongodb_action.setEnabled(True)
             self.validate_action.setEnabled(True)
             self.export_action.setEnabled(True)
+            self.advanced_search_action.setEnabled(True)
 
             self.status_bar.showMessage(f"Loaded {len(collection.messages)} messages from {file_path}")
             self.logger.info(f"Loaded file: {file_path}")
@@ -1694,6 +1728,73 @@ class MainWindow(QMainWindow):
         count = len(results)
         self.status_bar.showMessage(f"Search completed: {count} result{'s' if count != 1 else ''} found")
 
+    def _show_mongodb_dialog(self):
+        """Show MongoDB configuration dialog."""
+        dialog = MongoDBDialog(self)
+        dialog.config = self.mongodb_config  # Use existing config
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Update configuration
+            self.mongodb_config = dialog.get_config()
+
+            # Save configuration to app config
+            self.config.set_value('mongodb', self.mongodb_config.to_dict())
+
+            self.status_bar.showMessage("MongoDB configuration updated")
+            self.logger.info("MongoDB configuration updated")
+
+    def _save_to_mongodb(self):
+        """Save current collection to MongoDB."""
+        if not self.current_collection:
+            QMessageBox.information(
+                self, "MongoDB Save",
+                "Please open an HL7 file first."
+            )
+            return
+
+        # Check if MongoDB is available
+        if not self.mongodb_connector:
+            self.mongodb_connector = MongoDBConnector(self.mongodb_config)
+
+        if not self.mongodb_connector.is_available():
+            QMessageBox.warning(
+                self, "MongoDB Not Available",
+                "MongoDB support is not available. Please install pymongo:\n\npip install pymongo"
+            )
+            return
+
+        # Connect if not connected
+        if not self.mongodb_connector.is_connected():
+            if not self.mongodb_connector.connect():
+                QMessageBox.critical(
+                    self, "MongoDB Connection Failed",
+                    "Failed to connect to MongoDB. Please check your configuration."
+                )
+                return
+
+        # Save collection
+        try:
+            saved_ids = self.mongodb_connector.save_collection(self.current_collection)
+
+            if saved_ids:
+                QMessageBox.information(
+                    self, "MongoDB Save",
+                    f"Successfully saved {len(saved_ids)} messages to MongoDB."
+                )
+                self.status_bar.showMessage(f"Saved {len(saved_ids)} messages to MongoDB")
+            else:
+                QMessageBox.warning(
+                    self, "MongoDB Save",
+                    "No messages were saved to MongoDB."
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "MongoDB Save Error",
+                f"Failed to save messages to MongoDB:\n{e}"
+            )
+            self.logger.error(f"MongoDB save failed: {e}")
+
     def _refresh_view(self):
         """Refresh the current view."""
         if self.current_message:
@@ -1732,12 +1833,20 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Ready")
 
     def _export_message(self):
-        """Export current message to different format."""
-        if not self.current_message:
+        """Export messages to different formats."""
+        if not self.current_collection or not self.current_collection.messages:
+            QMessageBox.information(
+                self, "Export",
+                "Please open an HL7 file first to enable export functionality."
+            )
             return
 
-        # This would open an export dialog
-        QMessageBox.information(self, "Export", "Export functionality will be implemented in the next task.")
+        # Open export dialog
+        export_dialog = ExportDialog(self.current_collection, self)
+        if export_dialog.exec() == QDialog.DialogCode.Accepted:
+            self.status_bar.showMessage("Export completed successfully")
+        else:
+            self.status_bar.showMessage("Export cancelled")
 
     def _show_about(self):
         """Show about dialog."""
